@@ -19,7 +19,7 @@ def setup_logging(output_dir: str):
 
 def main():
     parser = argparse.ArgumentParser(description="BGP Policy Checker")
-    parser.add_argument("--as-number", default="34959", help="AS number to fetch policy from RR (default: 34959)")
+    parser.add_argument("--as-number", default="12345", help="AS number to fetch policy from RR (default: 12345)")
     parser.add_argument("--routers", default="bgp_policy_check/router.csv", help="Path to routers.csv (default: bgp_policy_check/router.csv)")
     parser.add_argument("--output-dir", default="bgp_policy_check/reports", help="Output directory for reports and logs (default: bgp_policy_check/reports)")
     parser.add_argument("--rr-host", default="rr.ntt.net", help="Route server host to query (default: rr.ntt.net)")

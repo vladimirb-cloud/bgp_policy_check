@@ -63,7 +63,7 @@
 `from config import Config`  
 
 `cfg = Config(cache_dir="cache")`  
-`policies = fetch_and_parse_whois("34959", "rr.ntt.net", cfg)`  
+`policies = fetch_and_parse_whois("12345", "rr.ntt.net", cfg)`  
 
 `for p in policies:`  
 `    print(p["asn"], p["peer_ip"], p["afi"])`  
