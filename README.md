@@ -43,6 +43,26 @@ BGP Policy Checker — инструмент для проверки соотве
 - `--yaml-report` — генерация отчета в YAML формате, по умолчанию `False`  
 - `--afi` — фильтр по адресному семейству: `ipv4`, `ipv6` или `all`, по умолчанию `all`  
 
+### Переменные окружения
+
+#### `$ROUTER_PASSWORD`
+
+Используется для указания пароля доступа к маршрутизатору.  
+
+**Пример использования в Linux/macOS:**
+
+```bash
+export ROUTER_PASSWORD="ваш_пароль"
+```
+
+**Пример использования в Windows (PowerShell):**
+```bash
+$env:ROUTER_PASSWORD="ваш_пароль"
+python main.py
+```
+
+> [!CAUTION]
+> ⚠️ Не храните пароль в коде напрямую. Используйте переменные окружения для безопасности.
 ### Пример запуска
 
 `python -m bgp_policy_check.main --as-number 12345 --afi ipv4 --json-report`  
