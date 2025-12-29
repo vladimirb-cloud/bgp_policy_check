@@ -58,7 +58,6 @@ export ROUTER_PASSWORD="ваш_пароль"
 **Пример использования в Windows (PowerShell):**
 ```bash
 $env:ROUTER_PASSWORD="ваш_пароль"
-python main.py
 ```
  
 > [!CAUTION]
