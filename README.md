@@ -23,11 +23,7 @@ BGP Policy Checker — инструмент для проверки соотве
 
 2. Установите зависимости (если есть `requirements.txt`):  
 
-`pip install -r requirements.txt`  
-
-> [!CAUTION]
-> Advises about risks or negative outcomes of certain actions.
-
+`pip install -r requirements.txt`
 
 ---
 
