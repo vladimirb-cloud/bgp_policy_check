@@ -1,2 +1,3 @@
 name,host,user,auth_method,password,port
 router1.domain.example,192.168.0.1,admin,password,$ROUTER_PASSWORD,22
+router2.domain.example,192.168.0.2,admin,password,$ROUTER_PASSWORD,22
