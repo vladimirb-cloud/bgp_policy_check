@@ -25,6 +25,10 @@ BGP Policy Checker — инструмент для проверки соотве
 
 `pip install -r requirements.txt`  
 
+> [!CAUTION]
+> Advises about risks or negative outcomes of certain actions.
+
+
 ---
 
 ## Использование
