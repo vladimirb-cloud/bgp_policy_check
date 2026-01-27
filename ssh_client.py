@@ -1,12 +1,23 @@
 import os
 import json
 import logging
+import ipaddress
+import re
 from typing import List, Dict
-from netmiko import ConnectHandler
 from .utils import is_private_asn
-from dotenv import load_dotenv
 
-load_dotenv()
+try:
+    from netmiko import ConnectHandler  # type: ignore
+except Exception:  # pragma: no cover
+    ConnectHandler = None
+
+try:
+    from dotenv import load_dotenv  # type: ignore
+except Exception:  # pragma: no cover
+    load_dotenv = None
+
+if load_dotenv:
+    load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -70,52 +81,45 @@ class JuniperParser(VendorParser):
         return peers
 
 class AristaParser(VendorParser):
-    def parse_bgp_output(self, text: str) -> List[Dict]:
+    def parse_bgp_output(self, output: str) -> List[Dict]:
         peers = []
-        for line in text.splitlines():
-            # Пример строки Arista IPv4:
-            # 10.0.0.2          4    65000  10000  10000    0    0 00:05:12 40  Established
-            m4 = re.match(
-                r"\s*(\d{1,3}(?:\.\d{1,3}){3})\s+\d+\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+\S+\s+\S+\s+(\S+)",
-                line
-            )
-            if m4:
-                peer_ip = m4.group(1)
-                remote_as = int(m4.group(2))
-                state = m4.group(3)
+        try:
+            data = json.loads(output)
+            peers_json = data.get("vrfs", {}).get("internet", {}).get("peers", {})
+        except Exception as e:
+            logger.error(f"Failed to parse Arista JSON output: {e}")
+            return peers
 
+        for peer_ip, info in peers_json.items():
+            try:
+                normalized_ip = str(ipaddress.ip_address(peer_ip))
+                remote_as = int(info.get("asn", 0))
+                state = info.get("peerState", "unknown")
+
+                # Игнорируем приватные ASN
                 if is_private_asn(remote_as):
                     continue
 
-                peers.append({
-                    "peer_ip": peer_ip,
-                    "remote_as": remote_as,
-                    "afi": "ipv4",
-                    "state": state,
-                    "raw": line
-                })
+                # Определяем AFI по IP
+                afi = "ipv4" if ipaddress.ip_address(normalized_ip).version == 4 else "ipv6"
 
-            # Пример Arista IPv6:
-            # 2001:db8::2       4    65000  10000  10000    0    0 00:05:12 40  Established
-            m6 = re.match(
-                r"\s*([0-9a-fA-F:]+(?:::[0-9a-fA-F:]*)?)\s+\d+\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+\S+\s+\S+\s+(\S+)",
-                line
-            )
-            if m6:
-                peer_ip = m6.group(1)
-                remote_as = int(m6.group(2))
-                state = m6.group(3)
-
-                if is_private_asn(remote_as):
-                    continue
+                raw_info = {
+                    "peerAsn": remote_as,
+                    "peerState": state
+                }
 
                 peers.append({
-                    "peer_ip": peer_ip,
+                    "peer_ip": normalized_ip,
                     "remote_as": remote_as,
-                    "afi": "ipv6",
+                    "afi": afi,
                     "state": state,
-                    "raw": line
+                    "raw": raw_info
                 })
+
+            except Exception as e:
+                logger.warning(f"Failed to parse peer {peer_ip}: {e}")
+                continue
+
         return peers
 
 class CiscoParser(VendorParser):
@@ -186,6 +190,8 @@ def detect_vendor(conn):
         return "juniper_junos"
 
 def gather_bgp_from_router(router: Dict) -> List[Dict]:
+    if ConnectHandler is None:
+        raise RuntimeError("netmiko is not installed; run with --no-ssh or install dependencies.")
     device = {
         "device_type": "autodetect",
         "host": router["host"],
@@ -222,7 +228,8 @@ def gather_bgp_from_router(router: Dict) -> List[Dict]:
         # Используем JSON-вывод для Juniper, только instance internet
         output = conn.send_command("show bgp summary instance internet | display json | no-more")
     elif vendor == "arista_eos":
-        output = conn.send_command("show ip bgp summary vrf internet")
+        # Используем JSON-вывод для Arista
+        output = conn.send_command("show ip bgp summary vrf internet | json | no-more")
     elif vendor == "cisco_ios":
         output = conn.send_command("show ip bgp summary")
     else:

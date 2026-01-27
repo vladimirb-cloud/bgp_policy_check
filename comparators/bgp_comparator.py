@@ -4,10 +4,18 @@ from ..ssh_client import gather_bgp_from_router
 from ..config import Config
 
 
-def compare_policies_to_routers(policies: List[Dict], routers_info: List[Dict], config: Config) -> Tuple[
-    List[Dict], Dict]:
+def compare_policies_to_routers(
+    policies: List[Dict],
+    routers_info: List[Dict],
+    config: Config
+) -> Tuple[List[Dict], Dict]:
+    """
+    Сравнивает политики BGP с текущими BGP-пирами на устройствах.
+    Возвращает список инцидентов и статистику BGP-сессий.
+    """
     incidents = []
-    # Статистика: { afi: { state: {"total": N, "with_policy": M, "without_policy": K} } }
+
+    # --- Инициализация статистики BGP ---
     bgp_stats = {
         "total": 0,
         "afi": {
@@ -33,18 +41,27 @@ def compare_policies_to_routers(policies: List[Dict], routers_info: List[Dict], 
         "other": 0
     }
 
-    # Фильтр политик по AFI
+    # --- Фильтр политик по AFI ---
     filtered_policies = policies
     if config.afi_filter != "all":
         filtered_policies = [p for p in policies if p.get("afi", "ipv4") == config.afi_filter]
 
-    # Индекс: (peer_ip, afi) -> asn
-    policy_index = {}
+    # --- Индекс политик: (peer_ip, afi) -> expected AS ---
+    policy_by_peer: Dict[tuple, set] = {}
+    policy_by_asn: Dict[tuple, set] = {}
     for p in filtered_policies:
-        peer_ip = p.get("peer_ip")
+        asn = p.get("asn")
         afi = p.get("afi", "ipv4")
-        if peer_ip:
-            policy_index[(peer_ip, afi)] = p["asn"]
+        peer_ip = p.get("peer_ip")
+        if not asn or not peer_ip:
+            continue
+
+        policy_by_peer.setdefault((peer_ip, afi), set()).add(int(asn))
+        policy_by_asn.setdefault((int(asn), afi), set()).add(peer_ip)
+
+    # --- Обход всех роутеров ---
+    if not getattr(config, "ssh_enabled", True):
+        return [], bgp_stats
 
     for router in routers_info:
         try:
@@ -56,78 +73,94 @@ def compare_policies_to_routers(policies: List[Dict], routers_info: List[Dict], 
         present_peers = set()
         for n in neighbors:
             peer_ip = n.get("peer_ip")
-            remote_as = n.get("remote_as")
             state = n.get("state", "")
-            afi = n.get("afi", "ipv4")  # "ipv4", "ipv6", или "other"
+            afi = n.get("afi", "ipv4")
+            raw = n.get("raw", {})
 
-            # Пропускаем, если фильтр AFI активен и не совпадает
+            # Берем реальный ASN из raw, fallback на n.get("remote_as")
+            peer_asn = raw.get("peerAsn", n.get("remote_as", 0))
+            try:
+                peer_asn_int = int(peer_asn)
+            except Exception:
+                peer_asn_int = 0
+
+            # Пропускаем, если фильтр AFI включен
             if config.afi_filter != "all" and afi != config.afi_filter:
                 continue
 
-            raw = n.get("raw")
             if not peer_ip:
-                incidents.append(
-                    {"router": router["name"], "peer": None, "issue": "neighbor_no_ip_parsed", "details": raw})
+                incidents.append({
+                    "router": router["name"],
+                    "peer": None,
+                    "issue": "neighbor_no_ip_parsed",
+                    "details": raw
+                })
                 continue
 
             present_peers.add((peer_ip, afi))
-
-            # Обновляем статистику
             bgp_stats["total"] += 1
-            expected_as = policy_index.get((peer_ip, afi))
+            expected_asns = policy_by_peer.get((peer_ip, afi))
+            expected_ips = policy_by_asn.get((peer_asn_int, afi))
+            asn_in_policy = expected_ips is not None
 
+            # --- Обновление статистики ---
             if afi in bgp_stats["afi"]:
                 bgp_stats["afi"][afi]["total"] += 1
-                states = bgp_stats["afi"][afi]["states"]
-                if re.search(r"Estab|Established", state, re.IGNORECASE):
-                    states["Established"]["total"] += 1
-                    if expected_as is None:
-                        states["Established"]["without_policy"] += 1
+                states_dict = bgp_stats["afi"][afi]["states"]
+
+                state_key = (
+                    "Established" if re.search(r"Estab|Established", state, re.IGNORECASE) else
+                    "Active" if re.search(r"Active", state, re.IGNORECASE) else
+                    "Connect" if re.search(r"Connect", state, re.IGNORECASE) else
+                    "Idle" if re.search(r"Idle", state, re.IGNORECASE) else None
+                )
+
+                if state_key:
+                    states_dict[state_key]["total"] += 1
+                    # В статистике считаем "with_policy" как "ASN есть в политике"
+                    if not asn_in_policy:
+                        states_dict[state_key]["without_policy"] += 1
                     else:
-                        states["Established"]["with_policy"] += 1
-                elif re.search(r"Active", state, re.IGNORECASE):
-                    states["Active"]["total"] += 1
-                    if expected_as is None:
-                        states["Active"]["without_policy"] += 1
-                    else:
-                        states["Active"]["with_policy"] += 1
-                elif re.search(r"Connect", state, re.IGNORECASE):
-                    states["Connect"]["total"] += 1
-                    if expected_as is None:
-                        states["Connect"]["without_policy"] += 1
-                    else:
-                        states["Connect"]["with_policy"] += 1
-                elif re.search(r"Idle", state, re.IGNORECASE):
-                    states["Idle"]["total"] += 1
-                    if expected_as is None:
-                        states["Idle"]["without_policy"] += 1
-                    else:
-                        states["Idle"]["with_policy"] += 1
+                        states_dict[state_key]["with_policy"] += 1
                 else:
                     bgp_stats["other"] += 1
             else:
-                # Если afi == "other", можно либо игнорировать, либо тоже учитывать
-                # Для совместимости, будем считать как "other"
                 bgp_stats["other"] += 1
 
-            if expected_as is None:
+            # --- Формирование инцидентов ---
+            # проверяем по ASN
+            if expected_ips is None:
+                # ASN + AFI нет в политике → neighbor_not_in_policy
                 incidents.append({
                     "router": router["name"],
                     "peer": peer_ip,
                     "issue": "neighbor_not_in_policy",
-                    "remote_as": remote_as,
+                    "remote_as": peer_asn,
                     "afi": afi,
                     "state": state,
                     "details": raw
                 })
+            elif peer_ip not in expected_ips:
+                # ASN есть, но IP отличается → отдельный инцидент
+                incidents.append({
+                    "router": router["name"],
+                    "peer": peer_ip,
+                    "issue": "ip_mismatch_in_policy",
+                    "remote_as": peer_asn,
+                    "afi": afi,
+                    "state": state,
+                    "details": f"Policy ASN {peer_asn} exists, but IP {peer_ip} not listed in policy"
+                })
+            # если peer_ip в expected_ips → всё ок, инцидентов не добавляем
+
             else:
-                if remote_as != expected_as:
+                if expected_asns is not None and int(peer_asn) not in expected_asns:
                     incidents.append({
                         "router": router["name"],
                         "peer": peer_ip,
                         "issue": "asn_mismatch",
-                        "remote_as": remote_as,
-                        "expected_as": expected_as,
+                        "remote_as": peer_asn,
+                        "expected_as": sorted(expected_asns) if expected_asns else None,
                         "afi": afi,
                         "state": state,
                         "details": raw
@@ -137,13 +170,14 @@ def compare_policies_to_routers(policies: List[Dict], routers_info: List[Dict], 
                         "router": router["name"],
                         "peer": peer_ip,
                         "issue": "session_not_established",
-                        "remote_as": remote_as,
-                        "expected_as": expected_as,
+                        "remote_as": peer_asn,
+                        "expected_as": sorted(expected_asns) if expected_asns else None,
                         "afi": afi,
                         "state": state,
                         "details": raw
                     })
 
+        # --- Проверка пиров, которые есть в политике, но отсутствуют на роутере ---
         for p in filtered_policies:
             peer_ip = p["peer_ip"]
             afi = p.get("afi", "ipv4")

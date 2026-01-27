@@ -9,6 +9,7 @@ class Config:
     output_dir: str
     rr_host: str
     as_number: str
+    ssh_enabled: bool = True
     json_report: bool = False
     yaml_report: bool = False  # <-- Новое поле
     afi_filter: str = "all"

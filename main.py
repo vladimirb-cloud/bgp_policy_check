@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--rr-host", default="rr.ntt.net", help="Route server host to query (default: rr.ntt.net)")
     parser.add_argument("--json-report", action="store_true", help="Also output report in JSON format")
     parser.add_argument("--yaml-report", action="store_true", help="Also output report in YAML format")
+    parser.add_argument("--no-ssh", action="store_true", help="Do not connect to routers; only parse RR policy")
     parser.add_argument("--afi", choices=["ipv4", "ipv6", "all"], default="all", help="Filter by AFI: ipv4, ipv6, or all (default: all)")
     args = parser.parse_args()
 
@@ -34,6 +35,7 @@ def main():
         output_dir=args.output_dir,
         rr_host=args.rr_host,
         as_number=args.as_number,
+        ssh_enabled=not args.no_ssh,
         json_report=args.json_report,
         yaml_report=args.yaml_report,
         afi_filter=args.afi

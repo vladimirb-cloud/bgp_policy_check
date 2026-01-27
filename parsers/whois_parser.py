@@ -91,7 +91,7 @@ def fetch_and_parse_whois(as_number: str, rr_host: str, config: Config) -> List[
     filtered = []
     seen = set()
     for r in results:
-        if is_private_asn(r["asn"]):
+        if config.exclude_private_asns and is_private_asn(r["asn"]):
             continue
 
         peer_ip = r["peer_ip"]
@@ -102,16 +102,19 @@ def fetch_and_parse_whois(as_number: str, rr_host: str, config: Config) -> List[
         afi = r["afi"]
         if afi == "ipv4":
             try:
-                ipaddress.IPv4Address(peer_ip)
+                peer_ip = str(ipaddress.IPv4Address(peer_ip))
             except Exception:
                 continue
         elif afi == "ipv6":
             try:
-                ipaddress.IPv6Address(peer_ip)
+                peer_ip = str(ipaddress.IPv6Address(peer_ip))
             except Exception:
                 continue
         else:
             continue
+
+        # нормализуем (важно для сравнения строк, особенно IPv6)
+        r["peer_ip"] = peer_ip
 
         # Исключаем broadcast и network (.0 / .255) для IPv4
         if afi == "ipv4":
