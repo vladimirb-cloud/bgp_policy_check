@@ -39,8 +39,7 @@ def _format_details(details) -> str:
         if "peerAsn" in details or "peerState" in details:
             peer_as = details.get("peerAsn", "N/A")
             state = details.get("peerState", "N/A")
-            desc = details.get("description", "N/A")  # если есть
-            det_str = f"AS{peer_as}, {state}, {desc}"
+            det_str = f"AS{peer_as}, {state}"
         # Juniper формат
         elif "peer-as" in details or "peer-state" in details or "description" in details:
             def get_data(field):
@@ -53,8 +52,7 @@ def _format_details(details) -> str:
                     return "N/A"
             peer_as = get_data("peer-as")
             state = get_data("peer-state")
-            desc = get_data("description")
-            det_str = f"AS{peer_as}, {state}, {desc}"
+            det_str = f"AS{peer_as}, {state}"
 
     elif isinstance(details, str):
         det_str = details
